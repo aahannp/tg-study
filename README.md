@@ -2,6 +2,46 @@
 
 A local, distraction-free study app. It reads lecture content from your Telegram channels (MTProto, via Telethon), sorts it into subject/chapter folders, and gives you a video and PDF study workspace in your browser.
 
+## Windows: step by step
+
+You need Windows 10 or 11 and a Telegram account. About 10 minutes the first time.
+
+**1. Install Python (once)**
+1. Go to https://www.python.org/downloads/ and click the yellow **Download Python 3.x** button (3.11 or newer).
+2. Run the installer. On the first screen, **tick "Add python.exe to PATH"** at the bottom, then click **Install Now**.
+
+**2. Download the app**
+1. On this GitHub page, click the green **Code** button, then **Download ZIP**.
+2. In your Downloads folder, right-click `tg-study-main.zip` and choose **Extract All...**, then **Extract**.
+
+**3. Get your Telegram API keys (once)**
+1. Go to https://my.telegram.org and log in with your phone number (with country code, e.g. `+91...`). The code arrives in your Telegram app, not by SMS.
+2. Click **API development tools**. Fill in any **App title** and **Short name** (e.g. `tgstudy`), pick **Desktop**, and click **Create application**.
+3. Keep the page open: you need **App api_id** (a number) and **App api_hash** (a long code). Never share these.
+
+**4. Start the app**
+1. Open the extracted `tg-study` folder and double-click **`start.bat`**.
+2. If Windows shows "Windows protected your PC", click **More info** and then **Run anyway**. (The script only sets up Python packages and starts the app.)
+3. The first start takes a few minutes while it installs things in a black window. Then the TG Study window opens. **Leave the black window open**: closing it closes the app.
+
+**5. Log in and pick channels**
+1. Enter your api_id, api_hash and phone number, then the login code Telegram sends to your Telegram app, and your two-step verification password if you have one.
+2. Tick the channels you study from, then press **Sync** on each one. Your lectures appear sorted into chapter folders.
+
+**Every day after that:** just double-click `start.bat`. It opens in a few seconds.
+
+**If something goes wrong**
+- **"Setup failed" or "Python was not found":** reinstall Python and make sure "Add python.exe to PATH" is ticked, then run `start.bat` again.
+- **The window stays blank or doesn't open:** install the Microsoft Edge WebView2 Runtime (search "WebView2 Runtime download" on microsoft.com). Or use your browser instead: open the `tg-study\backend` folder, click the address bar, type `cmd` and press Enter, then run
+  ```
+  .venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
+  ```
+  and open http://127.0.0.1:8765 in Edge or Chrome. Keep that window open while you study.
+- **Updating to a new version:** download and extract the new zip, then copy the `data` folder from your old `tg-study` folder into the new one. That keeps your login, library, progress and notes.
+- **Removing it:** delete the `tg-study` folder. To also cut its access to your Telegram account, open Telegram, go to **Settings > Devices** and end the TG Study session.
+
+Your login and library live in `tg-study\data`. Don't send that folder to anyone: it gives full access to your Telegram account.
+
 ## Folder structure
 
 ```
@@ -37,7 +77,7 @@ Three ways. The server always binds to 127.0.0.1 only. Your Telegram session fil
 
 **a) Double-click `start.command`** (macOS). First run creates `backend/.venv` and installs the pinned requirements, then opens the app window. (If macOS blocks it: right-click, Open.)
 
-**a2) Windows: double-click `start.bat`.** Needs Python 3.11+ from python.org (tick "Add python.exe to PATH"). The window uses Microsoft Edge WebView2, which Windows 10/11 already include. Same first-run setup as above.
+**a2) Windows: double-click `start.bat`.** Full walkthrough in "Windows: step by step" above. Needs Python 3.11+ from python.org (tick "Add python.exe to PATH"). The window uses Microsoft Edge WebView2, which Windows 10/11 already include. Same first-run setup as above.
 
 **b) Desktop window from the venv** (on Windows: `.venv\Scripts\activate` instead of `. .venv/bin/activate`)
 
