@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TG Study</title>
+  <link rel="icon" href="data:,">
+  <!-- Play CDN sends no CORS header, so it cannot carry an integrity hash -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    :root { color-scheme: dark; }
+    body { background: #0a0a0a; }
+    :focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; border-radius: 6px; }
+    dialog::backdrop { background: rgb(0 0 0 / 0.6); }
+    .dragging iframe { pointer-events: none; }
+  </style>
+  <script src="player.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"
+          integrity="sha384-l8f0VcPi/M1iHPv8egOnY/15TDwqgbOR1anMIJWvU6nLRgZVLTLSaNqi/TOoT5Fh" crossorigin="anonymous"></script>
+</head>
+<body class="flex min-h-screen flex-col bg-neutral-950 text-neutral-300 antialiased md:h-screen md:overflow-hidden"
+      x-data="player()" x-cloak @keydown.window="onKey($event)">
+
+  <!-- ── Header ── -->
+  <header class="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-3 border-b border-neutral-900 bg-neutral-950/90 px-4 backdrop-blur">
+    <a :href="mock ? '/?mock=1' : '/'" class="shrink-0 rounded-md px-1 text-sm text-neutral-400 hover:text-neutral-100">← Library</a>
+    <nav aria-label="Breadcrumb" class="min-w-0 flex-1 truncate text-sm text-neutral-500">
+      <template x-if="item">
+        <span><span x-text="item.subject"></span> <span aria-hidden="true">›</span> <span x-text="item.folder_name"></span> <span aria-hidden="true">›</span>
+          <span aria-current="page" class="text-neutral-200" x-text="item.title"></span></span>
+      </template>
+    </nav>
+    <span x-show="mock" class="shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-300">mock</span>
+    <div class="flex shrink-0 items-center gap-1">
+      <template x-for="[dir, n] in [['Previous', item?.prev], ['Next', item?.next]]" :key="dir">
+        <a :href="n ? itemHref(n.message_id) : null" :aria-disabled="!n" :title="n ? `${dir}: ${n.title}` : `No ${dir.toLowerCase()} item`"
+           class="rounded-lg border border-neutral-800 px-2.5 py-1 text-sm" :class="n ? 'text-neutral-300 hover:bg-neutral-900' : 'pointer-events-none text-neutral-700'"
+           x-text="dir === 'Previous' ? '‹ Prev' : 'Next ›'"></a>
+      </template>
+      <button @click="$refs.help.showModal()" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"
+              class="grid h-8 w-8 place-items-center rounded-lg text-sm text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">?</button>
+    </div>
+  </header>
+
+  <p x-show="!item && !error" class="grid flex-1 place-items-center text-sm text-neutral-600">Loading…</p>
+  <p x-show="error" role="alert" class="grid flex-1 place-items-center px-4 text-sm text-rose-400" x-text="error"></p>
+
+  <main x-show="item" class="flex min-h-0 flex-1 flex-col md:flex-row" :class="dragging && 'dragging cursor-col-resize select-none'">
+    <!-- ── Left: the item ── -->
+    <section class="min-w-0 space-y-3 p-4 md:flex-1 md:overflow-y-auto">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 class="min-w-0 flex-1 text-base font-semibold text-neutral-100" x-text="item?.title"></h1>
+        <span x-show="completed" class="rounded bg-emerald-400/10 px-2 py-0.5 text-xs font-medium text-emerald-300">Completed ✓</span>
+        <button @click="toggleComplete()" :aria-pressed="completed"
+                class="rounded-lg border border-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-900"
+                x-text="completed ? 'Mark not done' : 'Mark complete'"></button>
+        <div x-show="item?.folder_pdfs?.length" class="relative" @click.outside="pdfMenu = false" @keydown.escape.stop="pdfMenu = false; $refs.pdfBtn.focus()">
+          <button x-ref="pdfBtn" @click="pdfMenu = !pdfMenu" :aria-expanded="pdfMenu" aria-controls="pdf-menu"
+                  class="rounded-lg border border-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-900">Open PDF ▾</button>
+          <div id="pdf-menu" x-show="pdfMenu" x-transition.opacity
+               class="absolute right-0 z-30 mt-2 max-h-72 w-64 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl shadow-black/50">
+            <template x-for="p in item?.folder_pdfs || []" :key="p.message_id">
+              <button @click="openPdf(p)" class="w-full truncate rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800"
+                      :class="p.message_id === pdf?.message_id && 'text-sky-300'" x-text="p.title"></button>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- The player container: fullscreen targets this, so the controls and quick note stay visible. -->
+      <div x-ref="stage" class="flex flex-col overflow-hidden rounded-lg border border-neutral-900 bg-black" :class="fs && 'h-screen rounded-none border-0'">
+        <div class="relative min-h-0 flex-1">
+          <video x-ref="video" x-show="isVideo" :src="isVideo ? mediaUrl(item.message_id) : null" preload="metadata" playsinline
+                 x-init="$el.preservesPitch = true" @click="togglePlay()"
+                 @loadedmetadata="onMeta()" @timeupdate="cur = $el.currentTime" @durationchange="dur = $el.duration"
+                 @play="onPlay()" @pause="onPause()" @seeked="saveProgress()" @ended="onEnded()"
+                 @volumechange="muted = $el.muted" @error="error = 'Couldn’t load this video.'"
+                 class="mx-auto block w-full bg-black" :class="fs ? 'h-full' : 'aspect-video max-h-[70vh]'"></video>
+          <template x-if="item?.kind === 'pdf'">
+            <iframe :src="mediaUrl(item.message_id)" :title="item.title" class="block h-[75vh] w-full bg-white"></iframe>
+          </template>
+          <template x-if="item?.kind === 'image'">
+            <img :src="mediaUrl(item.message_id)" :alt="item.title" class="mx-auto block max-h-[75vh] object-contain">
+          </template>
+
+          <p x-show="flashText" x-transition.opacity.duration.150ms aria-hidden="true"
+             class="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-medium tabular-nums text-white" x-text="flashText"></p>
+
+          <div x-show="countdown > 0" role="status" class="absolute inset-0 grid place-items-center bg-black/70">
+            <div class="max-w-sm space-y-3 px-4 text-center">
+              <p class="text-xs uppercase tracking-wider text-neutral-500">Up next in <span class="tabular-nums" x-text="countdown"></span>s</p>
+              <p class="text-base font-medium text-neutral-100" x-text="item?.next ? `Next: ${item.next.title}` : ''"></p>
+              <div class="flex justify-center gap-2">
+                <button @click="goNext()" class="rounded-lg bg-neutral-100 px-4 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white">Play now</button>
+                <button @click="cancelNextUp()" class="rounded-lg border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:bg-neutral-900">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Control bar -->
+        <div x-show="isVideo" class="space-y-2 border-t border-neutral-900 bg-neutral-950 px-3 py-2">
+          <input type="range" aria-label="Seek" min="0" :max="dur || 0" step="any" :value="cur" :aria-valuetext="fmtTime(cur)"
+                 @input="$refs.video.currentTime = $event.target.value" class="block w-full accent-sky-400">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+            <button @click="togglePlay()" :aria-label="playing ? 'Pause' : 'Play'"
+                    class="grid h-8 w-8 place-items-center rounded-lg text-neutral-200 hover:bg-neutral-900">
+              <svg x-show="!playing" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>
+              <svg x-show="playing" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+            </button>
+            <span class="tabular-nums text-xs text-neutral-500"><span x-text="fmtTime(cur)"></span> / <span x-text="fmtTime(dur)"></span></span>
+
+            <div role="group" aria-label="Playback speed" class="flex flex-wrap items-center gap-1">
+              <button @click="speedBy(-0.1)" aria-label="Slower by 0.1" class="rounded px-1.5 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">−</button>
+              <span class="w-12 text-center text-xs font-medium tabular-nums text-sky-300" aria-live="polite" x-text="fmtSpeed(speed)"></span>
+              <button @click="speedBy(0.1)" aria-label="Faster by 0.1" class="rounded px-1.5 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">+</button>
+              <template x-for="p in SPEEDS" :key="p">
+                <button @click="setSpeed(p)" :aria-pressed="speed === p" x-text="p"
+                        class="rounded px-1.5 py-0.5 text-xs tabular-nums"
+                        :class="speed === p ? 'bg-sky-400/15 text-sky-300' : 'text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200'"></button>
+              </template>
+            </div>
+
+            <span class="flex-1"></span>
+            <button @click="toggleMute()" :aria-pressed="muted" class="rounded px-2 py-0.5 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+                    x-text="muted ? 'Unmute' : 'Mute'"></button>
+            <button @click="toggleFs()" :aria-pressed="fs" class="rounded px-2 py-0.5 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+                    x-text="fs ? 'Exit full screen' : 'Full screen'"></button>
+          </div>
+        </div>
+
+        <form @submit.prevent="addNote()" class="flex items-center gap-2 border-t border-neutral-900 bg-neutral-950 px-3 py-2">
+          <span x-show="isVideo" class="shrink-0 text-xs tabular-nums text-neutral-600" x-text="`[${fmtTime(cur)}]`"></span>
+          <label for="quick-note" class="sr-only">Quick note</label>
+          <input id="quick-note" x-ref="note" x-model="noteDraft" autocomplete="off" maxlength="5000"
+                 :placeholder="isVideo ? 'Note at this moment… (N)' : 'Add a note… (N)'"
+                 class="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 placeholder-neutral-600">
+        </form>
+      </div>
+    </section>
+
+    <!-- ── Drag handle (wide screens) ── -->
+    <div role="separator" aria-orientation="vertical" aria-label="Resize side pane" tabindex="0"
+         :aria-valuenow="paneW" aria-valuemin="280"
+         @pointerdown="startDrag($event)" @pointermove="onDrag($event)" @pointerup="endDrag()" @pointercancel="endDrag()"
+         @keydown.left.stop.prevent="resizeBy(24)" @keydown.right.stop.prevent="resizeBy(-24)"
+         class="hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-900 hover:bg-sky-400/40 md:block" :class="dragging && 'bg-sky-400/60'"></div>
+
+    <!-- ── Right: notes / PDF ── -->
+    <aside class="flex min-h-0 flex-col border-t border-neutral-900 md:w-[var(--pane-w)] md:shrink-0 md:border-t-0" :style="`--pane-w: ${paneW}px`">
+      <div role="tablist" aria-label="Side pane" class="flex shrink-0 items-center gap-1 border-b border-neutral-900 px-2 py-1.5">
+        <button role="tab" id="tab-notes" :aria-selected="tab === 'notes'" aria-controls="panel-notes" @click="tab = 'notes'"
+                class="rounded-md px-3 py-1 text-sm" :class="tab === 'notes' ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'">
+          Notes <span class="text-xs tabular-nums text-neutral-600" x-text="notes.length"></span></button>
+        <template x-if="pdf">
+          <button role="tab" id="tab-pdf" :aria-selected="tab === 'pdf'" aria-controls="panel-pdf" @click="tab = 'pdf'"
+                  class="min-w-0 truncate rounded-md px-3 py-1 text-sm" :class="tab === 'pdf' ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'"
+                  x-text="pdf.title"></button>
+        </template>
+        <button x-show="pdf" @click="closePdf()" aria-label="Close PDF" title="Close PDF"
+                class="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200">✕</button>
+      </div>
+
+      <div id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" x-show="tab === 'notes'" class="min-h-0 flex-1 overflow-y-auto p-2">
+        <p x-show="!notes.length" class="px-2 py-4 text-sm text-neutral-600">No notes yet. Press N to write one at the current moment.</p>
+        <ul class="space-y-1">
+          <template x-for="n in notes" :key="n.id">
+            <li class="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-neutral-900/50">
+              <button x-show="n.timestamp_sec != null" @click="seekTo(n.timestamp_sec)" :aria-label="`Play from ${fmtTime(n.timestamp_sec)}`"
+                      class="mt-0.5 shrink-0 rounded bg-sky-400/10 px-1.5 py-0.5 text-xs tabular-nums text-sky-300 hover:bg-sky-400/20"
+                      x-text="`[${fmtTime(n.timestamp_sec)}]`"></button>
+              <template x-if="editingId !== n.id">
+                <p class="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-neutral-300" x-text="n.body"></p>
+              </template>
+              <template x-if="editingId === n.id">
+                <input x-model="editDraft" x-init="$nextTick(() => $el.focus())" aria-label="Edit note" maxlength="5000"
+                       @keydown.enter.prevent="saveEdit(n)" @keydown.escape="editingId = null" @blur="saveEdit(n)"
+                       class="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-sm text-neutral-100">
+              </template>
+              <div x-show="editingId !== n.id" class="flex shrink-0 gap-0.5 opacity-60 group-hover:opacity-100 group-focus-within:opacity-100">
+                <button @click="startEdit(n)" aria-label="Edit note" title="Edit"
+                        class="grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>
+                </button>
+                <button @click="deleteNote(n)" aria-label="Delete note" title="Delete"
+                        class="grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-rose-300">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>
+                </button>
+              </div>
+            </li>
+          </template>
+        </ul>
+      </div>
+
+      <template x-if="pdf">
+        <iframe id="panel-pdf" role="tabpanel" aria-labelledby="tab-pdf" x-show="tab === 'pdf'" :src="mediaUrl(pdf.message_id)" :title="pdf.title"
+                class="block h-[75vh] w-full bg-white md:h-auto md:flex-1"></iframe>
+      </template>
+    </aside>
+  </main>
+
+  <!-- ── Shortcuts overlay ── -->
+  <dialog x-ref="help" aria-labelledby="help-title"
+          class="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-5 text-neutral-300 shadow-2xl shadow-black/60">
+    <div class="flex items-center justify-between">
+      <h2 id="help-title" class="font-semibold text-neutral-100">Keyboard shortcuts</h2>
+      <form method="dialog"><button class="grid h-7 w-7 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200" aria-label="Close">✕</button></form>
+    </div>
+    <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+      <template x-for="[keys, what] in SHORTCUTS" :key="keys">
+        <div class="contents">
+          <dt class="text-right"><kbd class="rounded border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 font-mono text-xs text-neutral-200" x-text="keys"></kbd></dt>
+          <dd class="text-neutral-400" x-text="what"></dd>
+        </div>
+      </template>
+    </dl>
+  </dialog>
+
+  <div role="status" aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
+    <p x-show="toast" x-transition.opacity x-text="toast"
+       class="pointer-events-auto rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2 text-sm text-neutral-200 shadow-xl shadow-black/50"></p>
+  </div>
+</body>
+</html>

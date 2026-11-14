@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TG Study</title>
+  <link rel="icon" href="data:,">
+  <!-- Play CDN sends no CORS header, so it cannot carry an integrity hash -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    :root { color-scheme: dark; }
+    body { background: #0a0a0a; }
+    :focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; border-radius: 6px; }
+    [draggable="true"] { -webkit-user-drag: element; }
+  </style>
+  <script src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"
+          integrity="sha384-l8f0VcPi/M1iHPv8egOnY/15TDwqgbOR1anMIJWvU6nLRgZVLTLSaNqi/TOoT5Fh" crossorigin="anonymous"></script>
+</head>
+<body class="min-h-screen bg-neutral-950 text-neutral-300 antialiased" x-data="app()" x-cloak>
+
+  <p x-show="screen === 'loading'" class="grid min-h-screen place-items-center text-sm text-neutral-600">Loading…</p>
+
+  <!-- ── Setup / login ── -->
+  <main x-show="screen === 'setup'" class="grid min-h-screen place-items-center px-4 py-10">
+    <form @submit.prevent="submit" class="w-full max-w-sm space-y-5">
+      <div>
+        <h1 class="text-xl font-semibold text-neutral-100">TG Study <span x-show="mock" class="ml-1 rounded bg-amber-400/10 px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wider text-amber-300">mock</span></h1>
+        <p class="mt-1 text-sm text-neutral-500"
+           x-text="{ creds: 'Connect your account to start studying.', code: 'Enter the login code you just received.', password: 'Your account has two-step verification. Enter its password.' }[step]"></p>
+      </div>
+
+      <template x-if="step === 'creds'">
+        <div class="space-y-4">
+          <div>
+            <label for="api_id" class="mb-1 block text-sm text-neutral-400">API ID</label>
+            <input id="api_id" x-model="form.api_id" x-effect="screen === 'setup' && $nextTick(() => $el.focus())" required inputmode="numeric" pattern="[0-9]+" autocomplete="off"
+                   title="Numbers only" class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-neutral-100 placeholder-neutral-600">
+          </div>
+          <div>
+            <label for="api_hash" class="mb-1 block text-sm text-neutral-400">API hash</label>
+            <input id="api_hash" x-model="form.api_hash" required pattern="[0-9a-fA-F]{32}" autocomplete="off" spellcheck="false"
+                   title="32 hexadecimal characters" class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 font-mono text-sm text-neutral-100">
+          </div>
+          <div>
+            <label for="phone" class="mb-1 block text-sm text-neutral-400">Phone number, with country code</label>
+            <input id="phone" type="tel" x-model="form.phone" required pattern="\+[0-9 ]{7,}" autocomplete="tel" placeholder="+91 98765 43210"
+                   title="Start with + and your country code" class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-neutral-100 placeholder-neutral-600">
+          </div>
+          <p class="text-xs text-neutral-500">Get these at my.telegram.org → API development tools.</p>
+        </div>
+      </template>
+
+      <template x-if="step === 'code'">
+        <div>
+          <label for="code" class="mb-1 block text-sm text-neutral-400">Login code</label>
+          <input id="code" x-model="form.code" x-init="$nextTick(() => $el.focus())" required inputmode="numeric" autocomplete="one-time-code"
+                 class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-lg tracking-[0.4em] text-neutral-100">
+        </div>
+      </template>
+
+      <template x-if="step === 'password'">
+        <div>
+          <label for="password" class="mb-1 block text-sm text-neutral-400">Two-step verification password</label>
+          <input id="password" type="password" x-model="form.password" x-init="$nextTick(() => $el.focus())" required autocomplete="current-password"
+                 class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-neutral-100">
+        </div>
+      </template>
+
+      <p x-show="error" role="alert" class="text-sm text-rose-400" x-text="error"></p>
+
+      <div class="flex items-center gap-3">
+        <button type="submit" :disabled="busy" :aria-busy="busy"
+                class="inline-flex items-center gap-2 rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:cursor-wait disabled:opacity-60">
+          <svg x-show="busy" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="40 100"/></svg>
+          <span x-text="{ creds: 'Send code', code: 'Verify', password: 'Unlock' }[step]"></span>
+        </button>
+        <button type="button" x-show="step !== 'creds'" @click="restartLogin()" :disabled="busy"
+                class="text-sm text-neutral-500 hover:text-neutral-300">Use a different number</button>
+      </div>
+    </form>
+  </main>
+
+  <!-- ── Top bar (signed in) ── -->
+  <header x-show="screen === 'picker' || screen === 'library'"
+          class="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-neutral-900 bg-neutral-950/90 px-4 backdrop-blur">
+    <span class="font-semibold text-neutral-100">TG Study <span x-show="mock" class="ml-1 rounded bg-amber-400/10 px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wider text-amber-300">mock</span></span>
+    <div class="flex items-center gap-2">
+      <button x-show="screen === 'library'" @click="goPicker()"
+              class="rounded-lg border border-neutral-800 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-900">Manage channels</button>
+      <div class="relative" @click.outside="menuOpen = false" @keydown.escape="menuOpen = false; $refs.menuBtn.focus()">
+        <button x-ref="menuBtn" @click="menuOpen = !menuOpen" :aria-expanded="menuOpen" aria-controls="account-menu" aria-label="Account"
+                class="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        </button>
+        <div id="account-menu" x-show="menuOpen" x-transition.opacity
+             class="absolute right-0 mt-2 w-52 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl shadow-black/50">
+          <p x-show="me" class="truncate px-3 py-2 text-xs text-neutral-500" x-text="me && `${me.name} · ${me.phone}`"></p>
+          <button @click="logout()" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Log out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Channel picker ── -->
+  <main x-show="screen === 'picker'" class="mx-auto max-w-2xl px-4 py-6">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-lg font-semibold text-neutral-100">Choose your subjects</h1>
+        <p class="text-sm text-neutral-500">Each channel or group you tick becomes a subject in your library.</p>
+      </div>
+      <button @click="goLibrary()" :disabled="!dialogs.some(d => d.selected)"
+              class="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-40">Done</button>
+    </div>
+
+    <label for="search" class="sr-only">Search channels and groups</label>
+    <input id="search" type="search" x-model="query" placeholder="Search channels and groups"
+           class="mt-5 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600">
+
+    <p x-show="dialogsLoading" class="mt-6 text-sm text-neutral-600">Loading your channels…</p>
+    <p x-show="pickerError" role="alert" class="mt-6 text-sm text-rose-400" x-text="pickerError"></p>
+    <p x-show="!dialogsLoading && !pickerError && !filteredDialogs.length" class="mt-6 text-sm text-neutral-600">No channels or groups match.</p>
+
+    <ul x-show="!dialogsLoading" class="mt-4 divide-y divide-neutral-900 rounded-lg border border-neutral-900">
+      <template x-for="d in filteredDialogs" :key="d.id">
+        <li>
+          <label class="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-neutral-900/60">
+            <input type="checkbox" :checked="d.selected" @change="toggleDialog(d)" class="h-4 w-4 shrink-0 accent-sky-400">
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm text-neutral-200" x-text="d.title"></span>
+              <span x-show="d.username" class="block truncate text-xs text-neutral-600" x-text="'@' + d.username"></span>
+            </span>
+            <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
+                  :class="d.kind === 'group' ? 'bg-violet-400/10 text-violet-300' : 'bg-sky-400/10 text-sky-300'" x-text="d.kind"></span>
+          </label>
+        </li>
+      </template>
+    </ul>
+  </main>
+
+  <!-- ── Library ── -->
+  <div x-show="screen === 'library'" class="md:flex md:h-[calc(100vh-3.5rem)]">
+    <aside aria-label="Subjects" class="border-b border-neutral-900 p-3 md:w-80 md:shrink-0 md:overflow-y-auto md:border-b-0 md:border-r">
+      <h2 class="px-2 pb-2 text-xs font-medium uppercase tracking-wider text-neutral-600">Subjects</h2>
+      <ul class="space-y-1">
+        <template x-for="c in channels" :key="c.id">
+          <li class="rounded-lg p-2" :class="c.id === activeId ? 'bg-neutral-900' : 'hover:bg-neutral-900/40'">
+            <div class="flex items-center gap-1">
+              <template x-if="editingId !== c.id">
+                <button @click="selectChannel(c)" :aria-current="c.id === activeId ? 'true' : null"
+                        class="min-w-0 flex-1 truncate rounded px-1 text-left text-sm font-medium text-neutral-100" x-text="c.subject || c.title"></button>
+              </template>
+              <template x-if="editingId === c.id">
+                <input x-model="draft" x-init="$nextTick(() => { $el.focus(); $el.select() })" aria-label="Subject name"
+                       @keydown.enter.prevent="saveRename(c)" @keydown.escape.stop="editingId = null" @blur="saveRename(c)"
+                       class="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-1 text-sm text-neutral-100">
+              </template>
+              <button x-show="editingId !== c.id" @click="startRename(c)" :aria-label="`Rename ${c.subject || c.title}`" title="Rename"
+                      class="grid h-7 w-7 shrink-0 place-items-center rounded text-neutral-600 hover:bg-neutral-800 hover:text-neutral-300">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>
+              </button>
+            </div>
+            <p class="px-1 text-xs text-neutral-600">
+              <span :title="c.last_synced_at || ''" x-text="'Synced ' + ago(c.last_synced_at)"></span>
+              · <span x-text="`${c.item_count} items`"></span>
+              <span x-show="subjectPct(c) != null" x-text="` · ${subjectPct(c)}% done`"></span>
+            </p>
+            <div x-show="subjectPct(c) != null" class="mx-1 mt-1.5 h-0.5 overflow-hidden rounded-full bg-neutral-800" aria-hidden="true">
+              <div class="h-full rounded-full bg-emerald-400/70" :style="`width:${subjectPct(c)}%`"></div>
+            </div>
+            <div class="mt-2 flex items-center justify-between gap-2 px-1">
+              <label class="flex cursor-pointer items-center gap-2 text-xs text-neutral-500">
+                <input type="checkbox" role="switch" :checked="!!c.ignore_stickers"
+                       @change="updateChannel(c, { ignore_stickers: $event.target.checked })" class="h-3.5 w-3.5 accent-sky-400">
+                Ignore stickers
+              </label>
+              <button @click="sync(c)" :disabled="!!syncing[c.id]" :aria-busy="!!syncing[c.id]" :aria-label="`Incremental sync of ${c.subject || c.title}`"
+                      class="inline-flex items-center gap-1.5 rounded-md border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-wait disabled:opacity-60">
+                <svg x-show="syncing[c.id]" class="h-3 w-3 animate-spin" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="40 100"/></svg>
+                <span x-text="syncing[c.id] ? 'Syncing…' : 'Incremental Sync'"></span>
+              </button>
+            </div>
+          </li>
+        </template>
+      </ul>
+    </aside>
+
+    <main class="min-w-0 flex-1 px-4 py-5 md:overflow-y-auto md:px-8">
+      <div class="mx-auto max-w-3xl">
+        <!-- Continue Watching -->
+        <section x-show="cont.length" aria-labelledby="cont-h" class="mb-6">
+          <h2 id="cont-h" class="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-600">Continue watching</h2>
+          <ul class="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+            <template x-for="c in cont" :key="`${c.channel_id}:${c.message_id}`">
+              <li class="w-56 shrink-0 snap-start">
+                <a :href="playerUrl(c.channel_id, c.message_id)" class="block rounded-lg border border-neutral-900 bg-neutral-900/40 p-3 hover:border-neutral-800 hover:bg-neutral-900">
+                  <span class="block truncate text-[11px] uppercase tracking-wider text-neutral-500" x-text="c.subject"></span>
+                  <span class="mt-0.5 block truncate text-sm text-neutral-200" x-text="c.title"></span>
+                  <span class="mt-3 block h-1 overflow-hidden rounded-full bg-neutral-800" aria-hidden="true">
+                    <span class="block h-full rounded-full bg-sky-400" :style="`width:${pct(c.position_sec, c.duration_sec)}%`"></span>
+                  </span>
+                  <span class="mt-1.5 block text-xs tabular-nums text-neutral-500" x-text="c.duration_sec ? `${mmss(c.duration_sec - c.position_sec)} left` : 'Resume'"></span>
+                </a>
+              </li>
+            </template>
+          </ul>
+        </section>
+
+        <template x-if="active">
+          <div>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h1 class="text-lg font-semibold text-neutral-100" x-text="active.subject || active.title"></h1>
+              <div class="flex items-center gap-3">
+                <p class="text-xs text-neutral-600" x-text="(active.parse_mode ? `${active.parse_mode} mode · ` : '') + `${active.message_count} messages`"></p>
+                <button id="new-folder-btn" x-show="newFolder === null" @click="newFolder = ''"
+                        class="rounded-md border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">+ New folder</button>
+              </div>
+            </div>
+
+            <template x-if="newFolder !== null">
+              <form @submit.prevent="createFolder()" @keydown.escape="newFolder = null; $nextTick(() => document.getElementById('new-folder-btn').focus())"
+                    class="mt-3 flex gap-2">
+                <input x-model="newFolder" x-init="$nextTick(() => $el.focus())" required maxlength="120" aria-label="New folder name" placeholder="Folder name"
+                       class="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 placeholder-neutral-600">
+                <button type="submit" class="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white">Create</button>
+                <button type="button" @click="newFolder = null" class="rounded-lg px-3 py-1.5 text-sm text-neutral-500 hover:text-neutral-300">Cancel</button>
+              </form>
+            </template>
+
+            <p x-show="foldersLoading && !folders.length" class="mt-6 text-sm text-neutral-600">Loading folders…</p>
+            <p x-show="!foldersLoading && !folders.length" class="mt-6 text-sm text-neutral-500">Nothing organised yet. Run Incremental Sync to pull in this subject's lectures.</p>
+
+            <div class="mt-5 space-y-2">
+              <template x-for="(f, fi) in folders" :key="f.id">
+                <section class="relative rounded-lg border bg-neutral-900/30" :aria-label="f.name"
+                         :class="drag?.type === 'item' && dropAt?.folder === f.id && dropAt.header ? 'border-sky-400/70 bg-sky-400/5' : 'border-neutral-900'"
+                         @dragover.prevent="overFolder($event, fi)" @drop.prevent="drop()">
+                  <div x-show="showFolderLine(fi)" class="pointer-events-none absolute inset-x-0 -top-[5px] h-0.5 rounded bg-sky-400"></div>
+                  <div x-show="fi === folders.length - 1 && showFolderLine(folders.length)" class="pointer-events-none absolute inset-x-0 -bottom-[5px] h-0.5 rounded bg-sky-400"></div>
+
+                  <!-- folder header: drag to reorder folders; drop items here to move them to the end -->
+                  <div class="flex items-center gap-1 rounded-lg py-1.5 pl-2 pr-2" :draggable="editingId !== 'f' + f.id"
+                       @dragstart="dragStart($event, { type: 'folder', id: f.id })" @dragend="dragEnd()" @dragover="overHeader(f)">
+                    <template x-if="editingId !== 'f' + f.id">
+                      <button @click="toggleFolder(f)" :aria-expanded="!!openIds?.[f.id]" :aria-controls="`folder-${f.id}`"
+                              class="flex min-w-0 flex-1 items-center gap-3 rounded px-2 py-1.5 text-left">
+                        <svg class="h-3 w-3 shrink-0 text-neutral-600 transition-transform" :class="openIds?.[f.id] && 'rotate-90'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                        <span class="h-2 w-2 shrink-0 rounded-full" :class="folderMeta(f.kind).dot" :title="folderMeta(f.kind).label"></span>
+                        <span class="min-w-0 flex-1 truncate text-sm text-neutral-200" x-text="f.name"></span>
+                      </button>
+                    </template>
+                    <template x-if="editingId === 'f' + f.id">
+                      <input x-model="draft" x-init="$nextTick(() => { $el.focus(); $el.select() })" aria-label="Folder name" maxlength="120"
+                             @keydown.enter.prevent="saveName('f' + f.id, f, 'name', `/api/folders/${f.id}`, true)"
+                             @keydown.escape.stop="cancelEdit('f' + f.id)" @blur="saveName('f' + f.id, f, 'name', `/api/folders/${f.id}`)"
+                             class="ml-7 min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-100">
+                    </template>
+                    <span class="shrink-0 text-xs tabular-nums text-neutral-500"><span x-text="`${done(f)}/${f.items.length}`"></span><span class="sr-only"> done</span></span>
+
+                    <div class="relative" @keydown.escape.stop="closeMenu()" @click.outside="menu === 'f' + f.id && (menu = null)"
+                         @focusout="$event.relatedTarget && !$el.contains($event.relatedTarget) && menu === 'f' + f.id && (menu = null)">
+                      <button :data-menu="'f' + f.id" @click="toggleMenu('f' + f.id)" :aria-expanded="menu === 'f' + f.id" :aria-controls="`menu-f${f.id}`"
+                              :aria-label="`Folder options for ${f.name}`" class="grid h-8 w-8 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+                      </button>
+                      <div :id="`menu-f${f.id}`" x-show="menu === 'f' + f.id" class="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl shadow-black/50">
+                        <button @click="startEdit('f' + f.id, f.name)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Rename</button>
+                        <button x-show="fi > 0" @click="closeMenu(); moveFolder(f.id, fi - 1)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Move up</button>
+                        <button x-show="fi < folders.length - 1" @click="closeMenu(); moveFolder(f.id, fi + 2)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Move down</button>
+                        <button @click="deleteFolder(f)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-rose-300 hover:bg-neutral-800">Delete folder…</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mx-4 mb-2 h-0.5 overflow-hidden rounded-full bg-neutral-800" aria-hidden="true">
+                    <div class="h-full rounded-full bg-emerald-400/70" :style="`width:${pct(done(f), f.items.length)}%`"></div>
+                  </div>
+
+                  <ul x-show="openIds?.[f.id]" :id="`folder-${f.id}`" class="border-t border-neutral-900 py-1">
+                    <template x-for="(it, i) in f.items" :key="it.message_id">
+                      <li class="relative" :draggable="editingId !== 'i' + it.message_id"
+                          @dragstart="dragStart($event, { type: 'item', msg: it.message_id })" @dragend="dragEnd()" @dragover="overItem($event, f, i)">
+                        <div x-show="showItemLine(f, i)" class="pointer-events-none absolute inset-x-2 -top-px z-10 h-0.5 rounded bg-sky-400"></div>
+                        <div x-show="i === f.items.length - 1 && showItemLine(f, f.items.length)" class="pointer-events-none absolute inset-x-2 -bottom-px z-10 h-0.5 rounded bg-sky-400"></div>
+                        <div class="flex items-center gap-1 pr-2 hover:bg-neutral-900/60" :class="drag?.msg === it.message_id && 'opacity-40'">
+                          <template x-if="editingId !== 'i' + it.message_id">
+                            <a :href="playerUrl(activeId, it.message_id)" class="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left">
+                              <span class="w-12 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-medium uppercase tracking-wider" :class="itemMeta(it.kind).cls" x-text="itemMeta(it.kind).label"></span>
+                              <span class="hidden w-8 shrink-0 text-xs tabular-nums text-neutral-600 sm:block" x-text="it.lecture_no != null ? `L${it.lecture_no}` : ''"></span>
+                              <span class="min-w-0 flex-1 truncate text-sm" :class="it.completed ? 'text-neutral-500' : 'text-neutral-300'">
+                                <span class="sm:hidden" x-show="it.lecture_no != null" x-text="`L${it.lecture_no} · `"></span><span x-text="it.title"></span>
+                              </span>
+                              <span x-show="it.completed" class="shrink-0 text-[11px] font-medium text-emerald-400"><span aria-hidden="true">✓</span><span class="sr-only sm:not-sr-only"> Watched</span></span>
+                              <span x-show="it.confidence != null && it.confidence < 0.5" title="The organizer wasn't sure where this belongs"
+                                    class="hidden shrink-0 text-[10px] italic text-amber-300/50 sm:inline">low confidence</span>
+                              <span class="w-14 shrink-0 text-right text-xs tabular-nums text-neutral-600" x-text="mmss(it.duration)"></span>
+                            </a>
+                          </template>
+                          <template x-if="editingId === 'i' + it.message_id">
+                            <input x-model="draft" x-init="$nextTick(() => { $el.focus(); $el.select() })" aria-label="Item title" maxlength="200"
+                                   @keydown.enter.prevent="saveName('i' + it.message_id, it, 'title', `/api/items/${activeId}/${it.message_id}`, true)"
+                                   @keydown.escape.stop="cancelEdit('i' + it.message_id)" @blur="saveName('i' + it.message_id, it, 'title', `/api/items/${activeId}/${it.message_id}`)"
+                                   class="my-1 ml-4 min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-100">
+                          </template>
+
+                          <!-- offline copy -->
+                          <button @click.stop="dlClick(it)" :aria-label="dlLabel(it)" :title="dlLabel(it)" :aria-disabled="dlState(it).status === 'downloading'"
+                                  class="grid h-8 w-8 shrink-0 place-items-center rounded hover:bg-neutral-800"
+                                  :class="{ none: 'text-neutral-600 hover:text-neutral-300', downloading: 'cursor-default text-sky-400', done: 'text-sky-400', error: 'text-rose-400' }[dlState(it).status]">
+                            <svg x-show="dlState(it).status === 'none'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11m-4-4l4 4 4-4M5 20h14"/></svg>
+                            <svg x-show="dlState(it).status === 'downloading'" class="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+                              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-opacity=".2" stroke-width="3"/>
+                              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" transform="rotate(-90 12 12)" :stroke-dasharray="`${dlState(it).progress * 56.55} 56.55`"/>
+                            </svg>
+                            <svg x-show="dlState(it).status === 'done'" class="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 7v7m-3-3l3 3 3-3M8 17h8" fill="none" stroke="#0a0a0a" stroke-width="2" stroke-linecap="round"/></svg>
+                            <svg x-show="dlState(it).status === 'error'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3v.01"/></svg>
+                          </button>
+
+                          <div class="relative" @keydown.escape.stop="closeMenu()" @click.outside="menu === 'i' + it.message_id && (menu = null)"
+                               @focusout="$event.relatedTarget && !$el.contains($event.relatedTarget) && menu === 'i' + it.message_id && (menu = null)">
+                            <button :data-menu="'i' + it.message_id" @click="toggleMenu('i' + it.message_id)" :aria-expanded="menu === 'i' + it.message_id"
+                                    :aria-controls="`menu-i${it.message_id}`" :aria-label="`Options for ${it.title}`"
+                                    class="grid h-8 w-8 shrink-0 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200">
+                              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+                            </button>
+                            <div :id="`menu-i${it.message_id}`" x-show="menu === 'i' + it.message_id"
+                                 class="absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl shadow-black/50">
+                              <button @click="setWatched(it, !it.completed)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800" x-text="it.completed ? 'Mark unwatched' : 'Mark watched'"></button>
+                              <button @click="startEdit('i' + it.message_id, it.title)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Rename</button>
+                              <button x-show="i > 0" @click="closeMenu(); moveItem(it.message_id, f.id, i - 1)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Move up</button>
+                              <button x-show="i < f.items.length - 1" @click="closeMenu(); moveItem(it.message_id, f.id, i + 2)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Move down</button>
+                              <button x-show="dlState(it).status === 'done'" @click="removeOffline(it)" class="block w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800">Remove offline copy</button>
+                              <template x-if="folders.length > 1">
+                                <div role="group" :aria-labelledby="`mv-${it.message_id}`" class="mt-1 border-t border-neutral-800 pt-1">
+                                  <p :id="`mv-${it.message_id}`" class="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600">Move to folder</p>
+                                  <div class="max-h-48 overflow-y-auto">
+                                    <template x-for="t in folders.filter((t) => t.id !== f.id)" :key="t.id">
+                                      <button @click="closeMenu(); moveItem(it.message_id, t.id, t.items.length)" class="block w-full truncate rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-800" x-text="t.name"></button>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                        <!-- partial progress underline -->
+                        <div x-show="!it.completed && it.position_sec > 0 && it.duration" class="pointer-events-none absolute inset-x-4 bottom-0 h-0.5" aria-hidden="true">
+                          <div class="h-full rounded-full bg-sky-400/60" :style="`width:${pct(it.position_sec, it.duration)}%`"></div>
+                        </div>
+                      </li>
+                    </template>
+                    <li x-show="!f.items.length" @dragover="overHeader(f)" class="px-4 py-3 text-xs text-neutral-600">Empty. Drag items here, or use an item's ⋯ menu.</li>
+                  </ul>
+                </section>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </main>
+  </div>
+
+  <div role="status" aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
+    <p x-show="toast" x-transition.opacity x-text="toast"
+       class="pointer-events-auto rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2 text-sm text-neutral-200 shadow-xl shadow-black/50"></p>
+  </div>
+</body>
+</html>
